@@ -7,7 +7,8 @@ import {
   useNavigate, 
   useParams,
   Link,
-  useSearchParams
+  useSearchParams,
+  useLocation
 } from 'react-router-dom';
 import { 
   onAuthStateChanged, 
@@ -405,6 +406,7 @@ const useTheme = () => useContext(ThemeContext);
 
 const AuthContext = createContext<{
   user: AppUser | null;
+  isKhatabookAdmin: boolean;
   loading: boolean;
   needsRole: boolean;
   firebaseAuthUser: FirebaseUser | null;
@@ -567,6 +569,7 @@ const useBackgroundSync = () => {
 
 const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AppUser | null>(null);
+  const [isKhatabookAdmin, setIsKhatabookAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [needsRole, setNeedsRole] = useState(false);
   const [tempUser, setTempUser] = useState<FirebaseUser | null>(null);
@@ -575,6 +578,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setTempUser(firebaseUser);
+      setIsKhatabookAdmin(false);
       if (emailSignupInProgressRef.current) {
         // Email/password signup critical section: the signup flow itself will write the
         // Firestore users/{uid} doc and then signOut. We must NOT run any Firestore checks
@@ -586,6 +590,8 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             let userData = userDoc.data() as AppUser;
+            const platformRoles = userDoc.get('platformRoles') as Record<string, unknown> | undefined;
+            setIsKhatabookAdmin(platformRoles?.khatabookAdmin === true);
             // Force shopkeeper role for the main user email if it was accidentally set to customer
             if (firebaseUser.email === 'kamaldevjobs@gmail.com' && userData.role !== 'shopkeeper') {
               userData.role = 'shopkeeper';
@@ -601,12 +607,15 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
             setUser(userData);
             setNeedsRole(false);
           } else {
+            setIsKhatabookAdmin(false);
             setNeedsRole(true);
           }
         } catch (error) {
+          setIsKhatabookAdmin(false);
           handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
         }
       } else {
+        setIsKhatabookAdmin(false);
         setUser(null);
         setNeedsRole(false);
       }
@@ -649,7 +658,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       ...(targetUser.email ? { email: targetUser.email } : {})
     };
     try {
-      await setDoc(doc(db, 'users', targetUser.uid), newUser);
+      await setDoc(doc(db, 'users', targetUser.uid), newUser, { merge: true });
       setUser(newUser);
       setNeedsRole(false);
     } catch (error) {
@@ -778,6 +787,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
         // those state vars. Manually reset local user-facing state right here so the LoginScreen
         // renders directly without any flash of Complete Profile or PendingApproval.
         setUser(null);
+        setIsKhatabookAdmin(false);
         setNeedsRole(false);
         setLoading(false);
         if (!success) {
@@ -817,7 +827,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, needsRole, firebaseAuthUser: tempUser, selectRole, updateUser, loginEmail, signUpEmail, completeSignUpFlow, forgotPasswordEmail }}>
+    <AuthContext.Provider value={{ user, isKhatabookAdmin, loading, login, logout, needsRole, firebaseAuthUser: tempUser, selectRole, updateUser, loginEmail, signUpEmail, completeSignUpFlow, forgotPasswordEmail }}>
       {children}
     </AuthContext.Provider>
   );
@@ -8455,8 +8465,249 @@ const RoleSelectionScreen = () => {
   );
 };
 
+interface KhataBookAdminUser {
+  uid: string;
+  name: string;
+  email: string;
+  mobile: string;
+  shopName: string;
+  role: string;
+  status: string;
+}
+
+const KhataBookAdminAccess = () => {
+  const { user, firebaseAuthUser, logout } = useAuth();
+  const location = useLocation();
+  const adminName = user?.name || firebaseAuthUser?.displayName || firebaseAuthUser?.email || 'Admin';
+  const isUsersPage = location.pathname === '/admin/users';
+  const isApprovalsPage = location.pathname === '/admin/approvals';
+  const [khataBookUsers, setKhataBookUsers] = useState<KhataBookAdminUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState('');
+  const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState('');
+  const pendingShopkeepers = khataBookUsers.filter((khataBookUser) =>
+    khataBookUser.role === 'shopkeeper' && khataBookUser.status === 'pending'
+  );
+  const dashboardCounts = {
+    total: khataBookUsers.length,
+    shopkeepers: khataBookUsers.filter((khataBookUser) => khataBookUser.role === 'shopkeeper').length,
+    customers: khataBookUsers.filter((khataBookUser) => khataBookUser.role === 'customer').length,
+    pendingApprovals: khataBookUsers.filter((khataBookUser) =>
+      khataBookUser.role === 'shopkeeper' && khataBookUser.status === 'pending'
+    ).length
+  };
+  const countsAvailable = !usersLoading && !usersError;
+  const dashboardCards = [
+    { label: 'Total KhataBook Users', value: dashboardCounts.total, icon: Users, iconClass: 'bg-indigo-50 text-indigo-700' },
+    { label: 'Shopkeepers', value: dashboardCounts.shopkeepers, icon: Store, iconClass: 'bg-emerald-50 text-emerald-700' },
+    { label: 'Customers', value: dashboardCounts.customers, icon: UserIcon, iconClass: 'bg-sky-50 text-sky-700' },
+    { label: 'Pending Approvals', value: dashboardCounts.pendingApprovals, icon: Bell, iconClass: 'bg-amber-50 text-amber-700' }
+  ];
+
+  useEffect(() => {
+    let isActive = true;
+    const loadKhataBookUsers = async () => {
+      setUsersLoading(true);
+      setUsersError('');
+      try {
+        const khataBookUsersQuery = query(
+          collection(db, 'users'),
+          where('platforms', 'array-contains', 'khatabook')
+        );
+        const snapshot = await getDocs(khataBookUsersQuery);
+        if (!isActive) return;
+
+        const rows = snapshot.docs.flatMap((userDoc) => {
+          const data = userDoc.data();
+          if (!Array.isArray(data.platforms) || !data.platforms.includes('khatabook')) return [];
+          return [{
+            uid: userDoc.id,
+            name: typeof data.name === 'string' && data.name.trim() ? data.name : 'Unnamed user',
+            email: typeof data.email === 'string' ? data.email : '',
+            mobile: typeof data.mobile === 'string' ? data.mobile : '',
+            shopName: typeof data.shopName === 'string' ? data.shopName : '',
+            role: typeof data.role === 'string' ? data.role : 'Unknown',
+            status: typeof data.status === 'string' ? data.status : 'Unknown'
+          }];
+        });
+        setKhataBookUsers(rows);
+      } catch {
+        if (isActive) setUsersError('Could not load KhataBook users. Please try again.');
+      } finally {
+        if (isActive) setUsersLoading(false);
+      }
+    };
+
+    void loadKhataBookUsers();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const approveShopkeeper = async (uid: string) => {
+    setApprovingUserId(uid);
+    setApprovalError('');
+    try {
+      await updateDoc(doc(db, 'users', uid), { status: 'approved' });
+      setKhataBookUsers((currentUsers) => currentUsers.map((khataBookUser) =>
+        khataBookUser.uid === uid ? { ...khataBookUser, status: 'approved' } : khataBookUser
+      ));
+    } catch {
+      setApprovalError('Could not approve this shopkeeper. Please try again.');
+    } finally {
+      setApprovingUserId(null);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4 sm:px-8">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white">
+            <UserIcon size={20} />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold">KhataBook Admin</h1>
+            <p className="text-sm text-slate-500">{adminName}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={logout}
+          className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <LogOut size={16} />
+          Logout
+        </button>
+      </header>
+      <nav aria-label="Admin navigation" className="flex gap-2 border-b border-slate-200 bg-white px-4 sm:px-8">
+        <Link
+          to="/admin"
+          className={`border-b-2 px-3 py-3 text-sm font-medium ${!isUsersPage && !isApprovalsPage ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
+        >
+          Dashboard
+        </Link>
+        <Link
+          to="/admin/users"
+          className={`border-b-2 px-3 py-3 text-sm font-medium ${isUsersPage ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
+        >
+          Users
+        </Link>
+        <Link
+          to="/admin/approvals"
+          className={`border-b-2 px-3 py-3 text-sm font-medium ${isApprovalsPage ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
+        >
+          Pending Approvals
+        </Link>
+      </nav>
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-10">
+        {isApprovalsPage ? (
+          <section aria-label="Pending shopkeeper approvals">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold">Pending Approvals</h2>
+              <p className="mt-1 text-sm text-slate-500">Shopkeepers waiting for approval</p>
+            </div>
+            {approvalError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-white p-4 text-sm text-red-700">{approvalError}</p>}
+            {usersLoading ? (
+              <p className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading approvals...</p>
+            ) : usersError ? (
+              <p role="alert" className="rounded-lg border border-red-200 bg-white p-6 text-sm text-red-700">{usersError}</p>
+            ) : pendingShopkeepers.length === 0 ? (
+              <p className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">No pending shopkeeper approvals.</p>
+            ) : (
+              <ul className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {pendingShopkeepers.map((shopkeeper) => (
+                  <li key={shopkeeper.uid} className="flex flex-col gap-4 border-b border-slate-100 p-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-slate-900">{shopkeeper.name}</h3>
+                      <div className="mt-2 flex flex-col gap-1 text-sm text-slate-500 sm:flex-row sm:gap-4">
+                        <span>{shopkeeper.mobile || 'Mobile not provided'}</span>
+                        <span>{shopkeeper.shopName || 'Shop name not provided'}</span>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3 self-start sm:self-auto">
+                      <span className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium capitalize text-amber-800">{shopkeeper.status}</span>
+                      <button
+                        type="button"
+                        onClick={() => void approveShopkeeper(shopkeeper.uid)}
+                        disabled={approvingUserId !== null}
+                        className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {approvingUserId === shopkeeper.uid ? 'Approving...' : 'Approve'}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : isUsersPage ? (
+          <section aria-label="KhataBook users">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold">KhataBook Users</h2>
+              <p className="mt-1 text-sm text-slate-500">Users registered on the KhataBook platform</p>
+            </div>
+            {usersLoading ? (
+              <p className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading users...</p>
+            ) : usersError ? (
+              <p role="alert" className="rounded-lg border border-red-200 bg-white p-6 text-sm text-red-700">{usersError}</p>
+            ) : khataBookUsers.length === 0 ? (
+              <p className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">No KhataBook users found.</p>
+            ) : (
+              <ul className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {khataBookUsers.map((khataBookUser) => {
+                  const roleLabel = khataBookUser.role === 'shopkeeper'
+                    ? 'Shopkeeper'
+                    : khataBookUser.role === 'customer'
+                      ? 'Customer'
+                      : khataBookUser.role;
+
+                  return (
+                    <li key={khataBookUser.uid} className="flex flex-col gap-3 border-b border-slate-100 p-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-slate-900">{khataBookUser.name}</h3>
+                        <p className="mt-1 truncate text-sm text-slate-500">{khataBookUser.email || khataBookUser.mobile || khataBookUser.uid}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
+                        <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">{roleLabel}</span>
+                        <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize text-slate-700">{khataBookUser.status}</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <>
+            <div className="mb-6">
+              <h2 className="text-xl font-bold">Dashboard</h2>
+            </div>
+            {usersError && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-white p-4 text-sm text-red-700">{usersError}</p>}
+            <section aria-label="KhataBook overview" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {dashboardCards.map(({ label, value, icon: Icon, iconClass }) => (
+                <article key={label} className="flex min-h-36 items-start justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex min-h-24 flex-col justify-between gap-5">
+                    <h3 className="text-sm font-medium text-slate-600">{label}</h3>
+                    <p className="text-3xl font-bold text-slate-900">{countsAvailable ? value : '--'}</p>
+                  </div>
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
+                    <Icon size={20} />
+                  </div>
+                </article>
+              ))}
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  );
+};
+
 const AppContent = () => {
-  const { user, loading, needsRole } = useAuth();
+  const { user, isKhatabookAdmin, loading, needsRole } = useAuth();
+  const location = useLocation();
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -8466,6 +8717,11 @@ const AppContent = () => {
 
   if (!user && !needsRole) return <LoginScreen />;
   if (needsRole) return <RoleSelectionScreen />;
+  if (location.pathname === '/admin' || location.pathname.startsWith('/admin/')) {
+    if (!isKhatabookAdmin) return <Navigate to="/" replace />;
+    if (location.pathname === '/admin' || location.pathname === '/admin/users' || location.pathname === '/admin/approvals') return <KhataBookAdminAccess />;
+    return <Navigate to="/admin" replace />;
+  }
   if (user?.role === 'shopkeeper' && user?.status === 'pending') return <PendingApprovalScreen />;
 
   return (

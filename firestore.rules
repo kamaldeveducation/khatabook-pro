@@ -39,6 +39,22 @@ service cloud.firestore {
       );
     }
 
+    function isKhatabookAdmin() {
+      return isSignedIn()
+        && userExists()
+        && getUserData().get('platformRoles', {}).get('khatabookAdmin', false) == true;
+    }
+
+    function canApproveKhatabookShopkeeper() {
+      return isKhatabookAdmin()
+        && resource.data.get('platforms', []) is list
+        && 'khatabook' in resource.data.get('platforms', [])
+        && resource.data.get('role', '') == 'shopkeeper'
+        && resource.data.get('status', '') == 'pending'
+        && request.resource.data.get('status', '') == 'approved'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+    }
+
     function isShopkeeper() {
       return isSignedIn() && (
         (request.auth.token.email == "kamaldevjobs@gmail.com") ||
@@ -59,9 +75,14 @@ service cloud.firestore {
 
     // --- Users Collection ---
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (isAdmin() || isKhatabookAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId && !('platformRoles' in request.resource.data);
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['platformRoles']))
+        || isAdmin()
+        || canApproveKhatabookShopkeeper()
+      );
       allow delete: if isAdmin();
       
       // Explicit customers sub-collection rules (source of truth)
