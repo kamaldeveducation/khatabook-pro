@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mukesh-kirana-store"
+  },
+  "targets": {
+    "mukesh-kirana-store": {
+      "hosting": {
+        "khatapro": [
+          "khatapro"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

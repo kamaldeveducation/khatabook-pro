@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "AppUser": {
+      "title": "AppUser",
+      "description": "User profile for shopkeepers or customers",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "role": { "type": "string", "enum": ["shopkeeper", "customer"] },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "shopName": { "type": "string" },
+        "smsFormat": { "type": "string" },
+        "txSmsFormat": { "type": "string" },
+        "bulkSmsFormat": { "type": "string" },
+        "source": { "type": "string", "enum": ["global", "my_customers"] }
+      },
+      "required": ["uid", "name", "mobile", "role", "status"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer record managed by a shopkeeper",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "totalDue": { "type": "number" },
+        "createdAt": { "type": "object", "description": "Firestore Timestamp" },
+        "lastUpdatedAt": { "type": "object", "description": "Firestore Timestamp" },
+        "reminderDate": { "type": "object", "description": "Firestore Timestamp" },
+        "alertThreshold": { "type": "number" },
+        "dailyReminderTime": { "type": "string" },
+        "lastReminderSentDate": { "type": "string" }
+      },
+      "required": ["name", "mobile", "ownerId", "totalDue", "createdAt", "lastUpdatedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerMobile": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["udhar", "jama"] },
+        "note": { "type": "string" },
+        "date": { "type": "object", "description": "Firestore Timestamp" },
+        "imageUrl": { "type": "string" },
+        "imageUrls": { "type": "array", "items": { "type": "string" } },
+        "runningBalance": { "type": "number" }
+      },
+      "required": ["customerId", "customerMobile", "ownerId", "amount", "type", "date"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier record managed by a shopkeeper",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "mobile": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "totalDue": { "type": "number" },
+        "createdAt": { "type": "object", "description": "Firestore Timestamp" },
+        "lastUpdatedAt": { "type": "object", "description": "Firestore Timestamp" },
+        "reminderDate": { "type": "object", "description": "Firestore Timestamp" },
+        "alertThreshold": { "type": "number" }
+      },
+      "required": ["name", "mobile", "ownerId", "totalDue", "createdAt", "lastUpdatedAt"]
+    },
+    "SupplierTransaction": {
+      "title": "SupplierTransaction",
+      "description": "Financial transaction record for a supplier",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "supplierMobile": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["udhar", "jama"] },
+        "note": { "type": "string" },
+        "date": { "type": "object", "description": "Firestore Timestamp" },
+        "imageUrls": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["supplierId", "supplierMobile", "ownerId", "amount", "type", "date"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "AppUser",
+      "description": "User profiles"
+    },
+    "customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer records"
+    },
+    "transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transaction records"
+    },
+    "suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Supplier records"
+    },
+    "supplierTransactions/{transactionId}": {
+      "schema": "SupplierTransaction",
+      "description": "Supplier transaction records"
+    }
+  }
+}

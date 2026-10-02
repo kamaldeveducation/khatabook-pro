@@ -1,0 +1,5 @@
+{
+  "name": "Kirana & Khata Master",
+  "description": "A unified platform for grocery shopping and credit management, allowing Kirana stores to manage accounts and customers to shop and track their Udhar.",
+  "requestFramePermissions": ["camera", "microphone", "contacts"]
+}

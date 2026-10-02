@@ -1,0 +1,169 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- 0. Global Catch-all ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == "kamaldevjobs@gmail.com") ||
+        (userExists() && getUserData().get('role', '') == 'admin')
+      );
+    }
+
+    function isShopkeeper() {
+      return isSignedIn() && (
+        (request.auth.token.email == "kamaldevjobs@gmail.com") ||
+        (userExists() && (getUserData().get('role', '') == 'shopkeeper' || getUserData().get('role', '') == 'admin') && getUserData().get('status', 'approved') == 'approved')
+      );
+    }
+
+    function isCustomer() {
+      return isSignedIn() && userExists() && 
+        getUserData().get('role', '') == 'customer' &&
+        (getUserData().get('status', 'approved') == 'approved');
+    }
+
+    function isSharingEnabledFor(resourceData) {
+      return resourceData.get('merchantCreditNetwork', null) is map
+        && resourceData.merchantCreditNetwork.get('sharingEnabled', false) == true;
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+      
+      // Explicit customers sub-collection rules (source of truth)
+      match /customers/{customerId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          request.auth.uid == userId ||
+          (isCustomer() && resource.data.mobile == getUserData().get('mobile', '')) ||
+          (isShopkeeper() && isSharingEnabledFor(resource.data))
+        );
+        allow create: if isShopkeeper() && request.auth.uid == userId && (request.resource.data.get('merchantCreditNetwork', null) == null || request.resource.data.merchantCreditNetwork is map);
+        allow update: if isAdmin()
+          || (
+              isShopkeeper()
+              && request.auth.uid == userId
+              && (
+                !('merchantCreditNetwork' in request.resource.data)
+                || (resource.data.get('ownerId', userId) == request.auth.uid)
+              )
+            )
+          || (
+              isCustomer()
+              && resource.data.mobile == getUserData().get('mobile', '')
+              && !('merchantCreditNetwork' in request.resource.data)
+            );
+        allow delete: if isAdmin() || (isShopkeeper() && request.auth.uid == userId);
+
+        match /transactions/{transactionId} {
+          allow read: if isSignedIn() && (
+            isAdmin() ||
+            request.auth.uid == userId ||
+            (isShopkeeper() && isSharingEnabledFor(get(/databases/$(database)/documents/users/$(userId)/customers/$(customerId)).data))
+          );
+          allow create, update, delete: if isAdmin() || (isShopkeeper() && request.auth.uid == userId);
+        }
+      }
+
+      // Sub-collections support
+      match /{document=**} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      }
+    }
+
+    // --- Customers (root legacy path) ---
+    match /customers/{customerId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        resource.data.ownerId == request.auth.uid || 
+        (isCustomer() && resource.data.mobile == getUserData().get('mobile', '')) ||
+        (isShopkeeper() && isSharingEnabledFor(resource.data))
+      );
+      allow create: if isShopkeeper() && request.resource.data.ownerId == request.auth.uid
+        && (request.resource.data.get('merchantCreditNetwork', null) == null || request.resource.data.merchantCreditNetwork is map);
+      allow update: if isAdmin()
+        || (isShopkeeper() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid)
+        || (isCustomer() && resource.data.mobile == getUserData().get('mobile', '') && !('merchantCreditNetwork' in request.resource.data));
+      allow delete: if isAdmin() || (isShopkeeper() && resource.data.ownerId == request.auth.uid);
+    }
+
+    // --- Transactions ---
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        resource.data.ownerId == request.auth.uid || 
+        (isSignedIn() && userExists() && getUserData().get('role', '') == 'customer' && resource.data.customerMobile == getUserData().get('mobile', ''))
+      );
+      
+      allow create: if isShopkeeper() || isAdmin() || (
+        isCustomer() && 
+        request.resource.data.type == "jama" &&
+        request.resource.data.customerMobile == getUserData().get('mobile', '')
+      );
+      
+      allow update, delete: if isAdmin() || (isShopkeeper() && resource.data.ownerId == request.auth.uid);
+    }
+
+    // --- Suppliers ---
+    match /suppliers/{supplierId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow create: if isShopkeeper();
+      allow update, delete: if isAdmin() || (isShopkeeper() && resource.data.ownerId == request.auth.uid);
+    }
+
+    // --- Supplier Transactions ---
+    match /supplierTransactions/{transactionId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow create: if isShopkeeper();
+      allow update, delete: if isAdmin() || (isShopkeeper() && resource.data.ownerId == request.auth.uid);
+    }
+    
+    // --- Products, Categories, etc (Legacy Support) ---
+    match /products/{productId} { allow read, write: if true; }
+    match /categories/{categoryId} { allow read, write: if true; }
+    match /subcategories/{subId} { allow read, write: if true; }
+    match /subsubcategories/{subSubId} { allow read, write: if true; }
+    match /purchaseBills/{billId} { allow read, write: if true; }
+    match /companies/{companyId} { allow read, write: if true; }
+    
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (isShopkeeper() || isAdmin() || resource.data.customerId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update: if isShopkeeper() || isAdmin();
+    }
+  }
+}
