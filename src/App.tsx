@@ -98,11 +98,13 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { SubscriptionScreen, BulkMessageUI } from './components/PremiumBulkMessage';
+import './components/PremiumBulkMessage.css';
 
 import { auth, db, storage } from './firebase';
 
 // --- Utilities ---
-function cn(...inputs: ClassValue[]) {
+export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
@@ -255,7 +257,7 @@ const getMillis = (timestamp: any): number => {
   return 0;
 };
 
-const toJSDate = (timestamp: any): Date => {
+export const toJSDate = (timestamp: any): Date => {
   if (!timestamp) return new Date();
   if (typeof timestamp.toDate === 'function') return timestamp.toDate();
   if (timestamp instanceof Date) return timestamp;
@@ -265,7 +267,7 @@ const toJSDate = (timestamp: any): Date => {
   return new Date();
 };
 
-const isSubscriptionActive = (user: AppUser | null) => {
+export const isSubscriptionActive = (user: AppUser | null) => {
   if (!user) return false;
   if (user.subscriptionStatus !== 'active') return false;
   if (!user.subscriptionExpiry) return false;
@@ -316,7 +318,7 @@ const compressImage = (file: File): Promise<Blob> => {
 };
 
 // --- Types ---
-interface AppUser {
+export interface AppUser {
   uid: string;
   name: string;
   email?: any;
@@ -335,7 +337,7 @@ interface AppUser {
   platforms?: any;
 }
 
-interface Customer {
+export interface Customer {
   id: string;
   name: string;
   mobile: string;
@@ -353,7 +355,7 @@ interface Customer {
   };
 }
 
-interface Supplier {
+export interface Supplier {
   id: string;
   name: string;
   mobile: string;
@@ -859,7 +861,7 @@ const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   );
 };
 
-const Layout: React.FC<{ 
+export const Layout: React.FC<{ 
   children: React.ReactNode; 
   title?: string; 
   showBack?: boolean; 
@@ -1790,141 +1792,22 @@ const SettingsScreen = () => {
   );
 };
 
-const SubscriptionScreen = () => {
+const SubscriptionScreenWrapper = () => {
   const { user, updateUser } = useAuth();
   const { theme } = useTheme();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-
-  const handlePayment = async () => {
-    if (!user) return;
-    setLoading(true);
-
-    const razorpayKey = (import.meta as any).env.VITE_RAZORPAY_KEY_ID;
-    if (!razorpayKey) {
-      alert("Razorpay Key ID is not configured. Please add it to your environment variables.");
-      setLoading(false);
-      return;
-    }
-
-    const options = {
-      key: razorpayKey,
-      amount: 100, // 1 INR in paise
-      currency: "INR",
-      name: "KhataBook Premium",
-      description: "1 Month Subscription for Bulk Messaging",
-      handler: async (response: any) => {
-        if (response.razorpay_payment_id) {
-          // Payment successful
-          const expiryDate = new Date();
-          expiryDate.setMonth(expiryDate.getMonth() + 1);
-          
-          await updateUser({
-            subscriptionStatus: 'active',
-            subscriptionExpiry: Timestamp.fromDate(expiryDate)
-          });
-          
-          alert("बधाई हो! आपकी प्रीमियम सदस्यता सक्रिय हो गई है।");
-          navigate('/');
-        }
-      },
-      prefill: {
-        name: user.name,
-        contact: user.mobile
-      },
-      theme: {
-        color: "#4f46e5"
-      }
-    };
-
-    const rzp = new (window as any).Razorpay(options);
-    rzp.open();
-    setLoading(false);
-  };
-
-  const isSubscribed = isSubscriptionActive(user);
-  const expiryDate = user?.subscriptionExpiry ? format(toJSDate(user.subscriptionExpiry), 'dd MMM yyyy') : null;
 
   return (
-    <Layout title="प्रीमियम सदस्यता" showBack backTo="/" hideLogout>
-      <div className="p-6 space-y-8">
-        <div className="text-center space-y-4">
-          <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-xl shadow-indigo-100 animate-pulse">
-            <Zap size={40} fill="currentColor" />
-          </div>
-          <div className="space-y-2">
-            <h2 className={cn("text-3xl font-black tracking-tight", theme === 'dark' ? "text-white" : "text-slate-900")}>
-              KhataBook Premium
-            </h2>
-            <p className="text-slate-500 font-medium">अपने व्यापार को अगले स्तर पर ले जाएं</p>
-          </div>
-        </div>
-
-        {isSubscribed ? (
-          <div className={cn(
-            "p-8 rounded-[2.5rem] border-2 border-emerald-100 text-center space-y-4",
-            theme === 'dark' ? "bg-emerald-900/20 border-emerald-900/30" : "bg-emerald-50"
-          )}>
-            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto">
-              <ShieldCheck size={32} />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-xl font-black text-emerald-700">प्रीमियम सक्रिय है</h3>
-              <p className="text-emerald-600/80 font-bold text-sm uppercase tracking-wider">वैधता: {expiryDate}</p>
-            </div>
-            <p className="text-slate-500 text-sm">अब आप बिना किसी रुकावट के बल्क मैसेज भेज सकते हैं।</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <div className={cn(
-              "p-8 rounded-[2.5rem] border-2 border-indigo-100 space-y-6",
-              theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white"
-            )}>
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-black">प्रीमियम प्लान</h3>
-                <div className="bg-indigo-600 text-white px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest">
-                  ₹1 / महीना
-                </div>
-              </div>
-              
-              <ul className="space-y-4">
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Check size={12} />
-                  </div>
-                  <p className="text-sm font-bold text-slate-600">अनलिमिटेड बल्क मैसेज (WhatsApp/SMS)</p>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Check size={12} />
-                  </div>
-                  <p className="text-sm font-bold text-slate-600">प्रीमियम सपोर्ट और अपडेट्स</p>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
-                    <Check size={12} />
-                  </div>
-                  <p className="text-sm font-bold text-slate-600">कोई विज्ञापन नहीं (Ad-Free Experience)</p>
-                </li>
-              </ul>
-
-              <button 
-                onClick={handlePayment}
-                disabled={loading}
-                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
-              >
-                {loading ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CreditCard size={20} />}
-                अभी सब्सक्राइब करें
-              </button>
-            </div>
-            
-            <p className="text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-              सुरक्षित भुगतान Razorpay द्वारा संचालित
-            </p>
-          </div>
-        )}
-      </div>
-    </Layout>
+    <SubscriptionScreen 
+      user={user}
+      updateUser={updateUser}
+      theme={theme}
+      navigate={navigate}
+      isSubscriptionActive={isSubscriptionActive}
+      toJSDate={toJSDate}
+      cn={cn}
+      Layout={Layout}
+    />
   );
 };
 
@@ -2309,19 +2192,13 @@ const Dashboard = () => {
     // Add to sent list to keep it visible in this session
     setSentReminderIds(prev => [...new Set([...prev, customer.id])]);
     
-    // Update lastReminderSentDate and clear reminderDate if it was due
+    // Update lastReminderSentDate
     try {
       const todayDate = format(new Date(), 'yyyy-MM-dd');
       const updates: any = {
         lastReminderSentDate: todayDate
       };
       
-      // If reminderDate was due (today or past), clear it
-      const collectionDate = customer.reminderDate ? toJSDate(customer.reminderDate) : null;
-      if (collectionDate && format(collectionDate, 'yyyy-MM-dd') <= todayDate) {
-        updates.reminderDate = null;
-      }
-
       updateDoc(customerDocRef(customer.ownerId, customer.id), updates);
     } catch (error) {
       console.error("Error updating reminder status:", error);
@@ -2347,19 +2224,13 @@ const Dashboard = () => {
     // Add to sent list to keep it visible in this session
     setSentReminderIds(prev => [...new Set([...prev, customer.id])]);
     
-    // Update lastReminderSentDate and clear reminderDate if it was due
+    // Update lastReminderSentDate
     try {
       const todayDate = format(new Date(), 'yyyy-MM-dd');
       const updates: any = {
         lastReminderSentDate: todayDate
       };
       
-      // If reminderDate was due (today or past), clear it
-      const collectionDate = customer.reminderDate ? toJSDate(customer.reminderDate) : null;
-      if (collectionDate && format(collectionDate, 'yyyy-MM-dd') <= todayDate) {
-        updates.reminderDate = null;
-      }
-
       updateDoc(customerDocRef(customer.ownerId, customer.id), updates);
     } catch (error) {
       console.error("Error updating reminder status:", error);
@@ -2789,7 +2660,7 @@ const Dashboard = () => {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest">डैशबोर्ड</h2>
           <button 
-            onClick={isSubscribed ? toggleBulkMode : () => navigate('/subscription')}
+            onClick={toggleBulkMode}
             className={cn(
               "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-2",
               isBulkMode 
@@ -8731,7 +8602,7 @@ const AppContent = () => {
       <Route path="/supplier/:id" element={user?.role === 'shopkeeper' ? <SupplierDetail /> : <Navigate to="/" />} />
       <Route path="/credit-check" element={user?.role === 'shopkeeper' ? <CreditCheckScreen /> : <Navigate to="/" />} />
       <Route path="/settings" element={<SettingsScreen />} />
-      <Route path="/subscription" element={<SubscriptionScreen />} />
+      <Route path="/subscription" element={<SubscriptionScreenWrapper />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

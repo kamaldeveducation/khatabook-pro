@@ -1,0 +1,9 @@
+/* Styles for Premium Bulk Message Feature */
+
+.premium-membership-container {
+  padding: 1rem;
+}
+
+.bulk-action-bar-indigo {
+  /* Using standard CSS or keeping it empty if using Tailwind in components */
+}
